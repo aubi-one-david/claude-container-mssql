@@ -1,0 +1,33 @@
+# Environment files with secrets
+.env
+.env.*
+!.env.example
+!.env.test
+!.env.test.template
+
+# API keys and credentials
+*.key
+*.pem
+credentials.json
+
+# Local settings
+*.local.json
+
+# Build artifacts
+*.log
+*.tmp
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Podman/Docker
+*.tar
+__pycache__/
