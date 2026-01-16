@@ -1,0 +1,147 @@
+# Claude Container - Secure Claude Code environment for MSSQL DataWarehouse development
+# See SPEC.md for full documentation
+#
+# Build: podman build -t claude-container -f Containerfile .
+# Run:   ./claude-run.sh [project-path]
+
+ARG PYTHON_VERSION=3.12
+ARG NODE_VERSION=20
+ARG GO_SQLCMD_VERSION=1.8.2
+
+# =============================================================================
+# Stage 1: Base image with system dependencies
+# =============================================================================
+FROM python:${PYTHON_VERSION}-slim-bookworm AS base
+
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Essential utilities
+    curl \
+    gnupg \
+    ca-certificates \
+    apt-transport-https \
+    bzip2 \
+    # Version control
+    git \
+    # Network/firewall
+    iptables \
+    iproute2 \
+    # JSON processing
+    jq \
+    # ODBC dependencies
+    unixodbc \
+    unixodbc-dev \
+    # Process management
+    sudo \
+    && rm -rf /var/lib/apt/lists/*
+
+# =============================================================================
+# Stage 2: Install Microsoft ODBC Driver 18
+# =============================================================================
+FROM base AS odbc
+
+# Add Microsoft repository and install ODBC Driver 18
+RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/debian/12/prod bookworm main" > /etc/apt/sources.list.d/mssql-release.list \
+    && apt-get update \
+    && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 \
+    && rm -rf /var/lib/apt/lists/*
+
+# =============================================================================
+# Stage 3: Install Node.js and npm
+# =============================================================================
+FROM odbc AS nodejs
+
+ARG NODE_VERSION
+
+# Install Node.js from NodeSource
+RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm install -g npm@latest
+
+# =============================================================================
+# Stage 4: Install go-sqlcmd
+# =============================================================================
+FROM nodejs AS sqlcmd
+
+ARG GO_SQLCMD_VERSION
+
+# Download and install go-sqlcmd
+RUN ARCH=$(dpkg --print-architecture) \
+    && curl -fsSL "https://github.com/microsoft/go-sqlcmd/releases/download/v${GO_SQLCMD_VERSION}/sqlcmd-linux-${ARCH}.tar.bz2" \
+    | tar -xjf - -C /usr/local/bin \
+    && chmod +x /usr/local/bin/sqlcmd
+
+# =============================================================================
+# Stage 5: Install Python packages
+# =============================================================================
+FROM sqlcmd AS python-packages
+
+# Install Python packages for MSSQL connectivity
+# Note: uv removed (53MB) - mssql-mcp-server can be pip installed on demand
+RUN pip install --no-cache-dir pyodbc
+
+# =============================================================================
+# Stage 6: Install Claude Code and MCP servers
+# =============================================================================
+FROM python-packages AS claude
+
+# Install Claude Code globally
+# Note: MCP servers are NOT pre-installed - npx downloads them on demand
+# This saves ~100MB. First MCP use will be slower but subsequent uses are cached.
+RUN npm install -g @anthropic-ai/claude-code \
+    && npm cache clean --force
+
+# =============================================================================
+# Stage 7: Create non-root user and configure environment
+# =============================================================================
+FROM claude AS final
+
+# Create claude user with sudo access for firewall management
+RUN useradd -m -s /bin/bash -u 1000 claude \
+    && echo "claude ALL=(ALL) NOPASSWD: /usr/sbin/iptables, /usr/sbin/ip6tables" > /etc/sudoers.d/claude-firewall \
+    && chmod 0440 /etc/sudoers.d/claude-firewall
+
+# Create directory structure
+RUN mkdir -p /workspace /home/claude/.claude /home/claude/.local/bin \
+    && chown -R claude:claude /workspace /home/claude
+
+# Copy scripts
+COPY --chown=claude:claude scripts/ /home/claude/.local/bin/
+RUN chmod +x /home/claude/.local/bin/*
+
+# Copy default configuration
+COPY --chown=claude:claude config/default-claude.md /home/claude/.claude/CLAUDE.md
+COPY --chown=claude:claude config/mcp.json /home/claude/.mcp.json
+
+# Set environment variables
+ENV PATH="/home/claude/.local/bin:/opt/mssql-tools18/bin:$PATH" \
+    HOME="/home/claude" \
+    CLAUDE_CONFIG_DIR="/home/claude/.claude" \
+    # Default resource limits (can be overridden)
+    CLAUDE_CPU_LIMIT="4" \
+    CLAUDE_MEM_LIMIT="8g" \
+    # Firewall defaults
+    CLAUDE_WEB_ACCESS="off"
+
+# Switch to non-root user
+USER claude
+WORKDIR /workspace
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD claude --version || exit 1
+
+# Labels
+LABEL org.opencontainers.image.title="Claude Container" \
+      org.opencontainers.image.description="Secure Claude Code environment for MSSQL DataWarehouse development" \
+      org.opencontainers.image.source="https://github.com/USER/claude-container" \
+      org.opencontainers.image.licenses="MIT"
+
+# Entrypoint: Initialize firewall then start Claude
+ENTRYPOINT ["/home/claude/.local/bin/entrypoint.sh"]
+CMD ["claude", "--dangerously-skip-permissions"]

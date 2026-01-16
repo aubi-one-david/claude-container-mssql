@@ -1,0 +1,78 @@
+#!/bin/bash
+# Show Claude Container status
+# Usage: claude-status
+
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+echo -e "${BLUE}=== Claude Container Status ===${NC}"
+echo ""
+
+# Claude Code version
+echo -e "${GREEN}Claude Code:${NC}"
+claude --version 2>/dev/null || echo "  Not available"
+echo ""
+
+# Environment
+echo -e "${GREEN}Environment:${NC}"
+echo "  DB_SERVER: ${DB_SERVER:-<not set>}"
+echo "  DB_PORT: ${DB_PORT:-1433}"
+echo "  DB_DATABASE: ${DB_DATABASE:-<not set>}"
+echo "  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:+<set>}${ANTHROPIC_API_KEY:-<not set>}"
+echo "  BRAVE_API_KEY: ${BRAVE_API_KEY:+<set>}${BRAVE_API_KEY:-<not set>}"
+echo ""
+
+# Network status
+echo -e "${GREEN}Network:${NC}"
+if sudo iptables -L OUTPUT -n 2>/dev/null | grep -q "policy DROP"; then
+    echo "  Firewall: ACTIVE (whitelist mode)"
+    if sudo iptables -L OUTPUT -n | grep -q "tcp dpt:80.*ACCEPT"; then
+        echo -e "  Web access: ${GREEN}ENABLED${NC}"
+    else
+        echo -e "  Web access: ${YELLOW}DISABLED${NC}"
+    fi
+else
+    echo "  Firewall: NOT ACTIVE (container may lack NET_ADMIN)"
+fi
+echo ""
+
+# Tools
+echo -e "${GREEN}Available Tools:${NC}"
+echo -n "  sqlcmd: "
+sqlcmd --version 2>/dev/null | head -1 || echo "not found"
+echo -n "  python: "
+python --version 2>/dev/null || echo "not found"
+echo -n "  pyodbc: "
+python -c "import pyodbc; print(pyodbc.version)" 2>/dev/null || echo "not found"
+echo -n "  git: "
+git --version 2>/dev/null | head -1 || echo "not found"
+echo ""
+
+# MCP Servers
+echo -e "${GREEN}MCP Servers:${NC}"
+if [ -f "$HOME/.mcp.json" ]; then
+    jq -r '.mcpServers | keys[]' "$HOME/.mcp.json" 2>/dev/null | while read server; do
+        echo "  - $server"
+    done
+else
+    echo "  No MCP configuration found"
+fi
+echo ""
+
+# Workspace
+echo -e "${GREEN}Workspace:${NC}"
+echo "  Path: $(pwd)"
+if [ -d ".claude" ]; then
+    echo "  Project config: .claude/ found"
+    [ -f ".claude/CLAUDE.md" ] && echo "    - CLAUDE.md"
+    [ -d ".claude/agents" ] && echo "    - agents/ ($(ls .claude/agents 2>/dev/null | wc -l) files)"
+    [ -d ".claude/hooks" ] && echo "    - hooks/ ($(ls .claude/hooks 2>/dev/null | wc -l) files)"
+else
+    echo "  Project config: not found"
+fi
+if [ -d ".claude-sessions" ]; then
+    SESSION_COUNT=$(find .claude-sessions -name "*.jsonl" 2>/dev/null | wc -l)
+    echo "  Sessions: $SESSION_COUNT transcript(s)"
+fi

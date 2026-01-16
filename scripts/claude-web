@@ -1,0 +1,81 @@
+#!/bin/bash
+# Toggle web access for Claude Container
+# Usage: claude-web on|off|status
+
+set -e
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+show_status() {
+    if sudo iptables -L OUTPUT -n | grep -q "tcp dpt:80.*ACCEPT"; then
+        echo -e "${GREEN}Web access is ENABLED${NC}"
+        return 0
+    else
+        echo -e "${YELLOW}Web access is DISABLED${NC}"
+        return 1
+    fi
+}
+
+enable_web() {
+    if show_status >/dev/null 2>&1; then
+        echo "Web access is already enabled"
+        return 0
+    fi
+
+    echo "Enabling web access..."
+
+    # Find the position to insert (before final DROP/REJECT if any)
+    # Insert rules allowing HTTP/HTTPS
+    sudo iptables -A OUTPUT -p tcp --dport 80 -j ACCEPT
+    sudo iptables -A OUTPUT -p tcp --dport 443 -j ACCEPT
+
+    echo -e "${GREEN}Web access ENABLED${NC}"
+    echo "Claude can now access any website"
+    echo "Use 'claude-web off' to disable"
+}
+
+disable_web() {
+    if ! show_status >/dev/null 2>&1; then
+        echo "Web access is already disabled"
+        return 0
+    fi
+
+    echo "Disabling web access..."
+
+    # Remove the general HTTP/HTTPS rules
+    # We need to be careful not to remove specific domain rules
+    sudo iptables -D OUTPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
+    sudo iptables -D OUTPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || true
+
+    echo -e "${YELLOW}Web access DISABLED${NC}"
+    echo "Claude can only access whitelisted domains:"
+    echo "  - api.anthropic.com (Claude API)"
+    echo "  - github.com (git operations)"
+    echo "  - registry.npmjs.org (npm packages)"
+    echo "  - pypi.org (Python packages)"
+    echo "  - \$DB_SERVER (database)"
+}
+
+case "${1:-status}" in
+    on|enable)
+        enable_web
+        ;;
+    off|disable)
+        disable_web
+        ;;
+    status)
+        show_status
+        ;;
+    *)
+        echo "Usage: claude-web [on|off|status]"
+        echo ""
+        echo "Commands:"
+        echo "  on      Enable general web access (HTTP/HTTPS to any domain)"
+        echo "  off     Disable web access (whitelist only)"
+        echo "  status  Show current web access state"
+        exit 1
+        ;;
+esac

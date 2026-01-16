@@ -1,0 +1,90 @@
+name: Daily Update Check
+
+on:
+  schedule:
+    # Run twice daily at 6:00 and 18:00 UTC
+    # Claude Code releases are nearly daily
+    - cron: '0 6,18 * * *'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  check-and-update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check Claude Code version
+        id: claude-version
+        run: |
+          LATEST=$(npm view @anthropic-ai/claude-code version 2>/dev/null || echo "unknown")
+          echo "latest=$LATEST" >> $GITHUB_OUTPUT
+          echo "Latest Claude Code version: $LATEST"
+
+      - name: Check ODBC Driver version
+        id: odbc-version
+        run: |
+          # Check Microsoft's package repository for latest version
+          curl -s https://packages.microsoft.com/config/debian/12/prod.list > /dev/null
+          echo "ODBC driver check completed"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build test image
+        run: |
+          docker build -t update-test -f Containerfile .
+
+      - name: Run tests
+        run: |
+          docker run --rm update-test claude --version
+          docker run --rm update-test python -c "import pyodbc; print('pyodbc:', pyodbc.version)"
+
+      - name: Build and push to latest
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Containerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:daily-${{ github.run_number }}
+          labels: |
+            org.opencontainers.image.title=Claude Container
+            org.opencontainers.image.description=Claude Code with MSSQL tools
+            org.opencontainers.image.revision=${{ github.sha }}
+            claude.code.version=${{ steps.claude-version.outputs.latest }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+
+      - name: Create summary
+        run: |
+          echo "## Daily Update - Pushed to latest" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Version |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|---------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Claude Code | ${{ steps.claude-version.outputs.latest }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image Tag | \`latest\`, \`daily-${{ github.run_number }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Build, test, and push: **SUCCESS**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Pull with:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "podman pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,95 @@
+# Claude Container - Alpine (Multi-stage optimized)
+# Build: podman build -t claude-alpine:v3 -f Containerfile.alpine .
+
+ARG NODE_VERSION=22
+
+# =============================================================================
+# Stage 1: Build pyodbc wheel
+# =============================================================================
+FROM python:3.12-alpine AS pyodbc-builder
+
+# Install build dependencies
+RUN apk add --no-cache \
+    gcc \
+    g++ \
+    musl-dev \
+    unixodbc-dev
+
+# Build pyodbc wheel
+RUN pip wheel --no-cache-dir --wheel-dir=/wheels pyodbc
+
+# =============================================================================
+# Stage 2: Final image
+# =============================================================================
+FROM node:${NODE_VERSION}-alpine AS final
+
+# Install runtime packages (NO build tools)
+RUN apk add --no-cache \
+    # Required by Claude Code
+    git \
+    bash \
+    su-exec \
+    # Utilities
+    curl \
+    jq \
+    # Firewall
+    iptables \
+    # Process management
+    sudo \
+    # glibc compatibility for ODBC
+    gcompat \
+    libstdc++ \
+    # Python runtime (no dev packages)
+    python3 \
+    py3-pip \
+    # ODBC runtime
+    unixodbc
+
+# Install ODBC Driver 18 (includes sqlcmd and bcp)
+RUN curl -O https://download.microsoft.com/download/7/6/d/76de322a-d860-4894-9945-f0cc5d6a45f8/msodbcsql18_18.4.1.1-1_amd64.apk \
+    && curl -O https://download.microsoft.com/download/7/6/d/76de322a-d860-4894-9945-f0cc5d6a45f8/mssql-tools18_18.4.1.1-1_amd64.apk \
+    && apk add --allow-untrusted msodbcsql18_18.4.1.1-1_amd64.apk \
+    && apk add --allow-untrusted mssql-tools18_18.4.1.1-1_amd64.apk \
+    && rm -f *.apk
+
+# Copy pre-built pyodbc wheel from builder and install
+# Also install openpyxl for MSSQL data export/import scripts
+# Also install uv for fast package management with userns mapping support
+COPY --from=pyodbc-builder /wheels /wheels
+RUN pip3 install --no-cache-dir --break-system-packages /wheels/*.whl openpyxl uv \
+    && rm -rf /wheels
+
+# Install Claude Code
+RUN npm install -g @anthropic-ai/claude-code \
+    && npm cache clean --force
+
+# Create user
+RUN adduser -D -s /bin/bash -u 1001 claude \
+    && echo "claude ALL=(ALL) NOPASSWD: /usr/sbin/iptables, /sbin/iptables" > /etc/sudoers.d/claude-firewall \
+    && chmod 0440 /etc/sudoers.d/claude-firewall
+
+# Create directories with permissions for userns mapping
+# When using --userns=keep-id, the host UID maps into the container
+# Make directories writable by any user to support this
+RUN mkdir -p /workspace /home/claude/.claude /home/claude/.local/bin /home/claude/.cache \
+    && chown -R claude:claude /workspace /home/claude \
+    && chmod 777 /home/claude /home/claude/.claude /home/claude/.local /home/claude/.local/bin /home/claude/.cache
+
+# Copy scripts and config
+COPY --chown=claude:claude scripts/ /home/claude/.local/bin/
+RUN chmod +x /home/claude/.local/bin/*
+COPY --chown=claude:claude config/default-claude.md /home/claude/.claude/CLAUDE.md
+COPY --chown=claude:claude config/default-settings.json /home/claude/.claude/settings.json
+COPY --chown=claude:claude config/mcp.json /home/claude/.mcp.json
+
+# Environment
+ENV PATH="/home/claude/.local/bin:/opt/mssql-tools18/bin:$PATH" \
+    HOME="/home/claude" \
+    CLAUDE_CONFIG_DIR="/home/claude/.claude" \
+    CLAUDE_WEB_ACCESS="off"
+
+USER claude
+WORKDIR /workspace
+
+ENTRYPOINT ["/home/claude/.local/bin/entrypoint.sh"]
+CMD ["claude", "--dangerously-skip-permissions"]

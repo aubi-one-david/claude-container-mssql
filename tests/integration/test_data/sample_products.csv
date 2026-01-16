@@ -1,0 +1,11 @@
+product_id,product_name,category,price,quantity,created_date
+1,Widget A,Electronics,29.99,100,2024-01-15
+2,Widget B,Electronics,49.99,75,2024-01-16
+3,Gadget X,Accessories,15.50,200,2024-02-01
+4,Gadget Y,Accessories,22.75,150,2024-02-10
+5,Tool Pro,Hardware,89.99,50,2024-03-01
+6,Tool Basic,Hardware,39.99,120,2024-03-05
+7,Cable USB-C,Electronics,12.99,500,2024-03-10
+8,Adapter HDMI,Electronics,24.99,300,2024-03-15
+9,Mount Stand,Accessories,34.50,80,2024-04-01
+10,Power Bank,Electronics,59.99,90,2024-04-10

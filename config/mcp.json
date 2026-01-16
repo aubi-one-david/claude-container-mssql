@@ -1,0 +1,33 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
+      "env": {}
+    },
+    "mssql": {
+      "command": "python",
+      "args": ["-m", "mssql_mcp_server"],
+      "env": {
+        "MSSQL_HOST": "${DB_SERVER}",
+        "MSSQL_PORT": "${DB_PORT:-1433}",
+        "MSSQL_USER": "${DB_USERNAME}",
+        "MSSQL_PASSWORD": "${DB_PASSWORD}",
+        "MSSQL_DATABASE": "${DB_DATABASE}"
+      },
+      "_note": "Requires: pip install mssql-mcp-server. Maps DB_* env vars to MSSQL_* for server."
+    },
+    "memory": {
+      "command": "npx",
+      "args": ["-y", "mcp-memory-keeper"],
+      "env": {}
+    },
+    "brave-search": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+      "env": {
+        "BRAVE_API_KEY": "${BRAVE_API_KEY}"
+      }
+    }
+  }
+}
