@@ -32,6 +32,7 @@ RUN apk add --no-cache \
     # Utilities
     curl \
     jq \
+    file \
     # Firewall
     iptables \
     # Process management

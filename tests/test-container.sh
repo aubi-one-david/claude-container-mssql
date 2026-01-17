@@ -133,6 +133,8 @@ test_cmd "jq available" jq --version
 
 test_cmd "curl available" curl --version
 
+test_cmd "file available" file --version
+
 test_cmd "iptables available" which iptables
 
 test_cmd "Default CLAUDE.md exists" test -f /home/claude/.claude/CLAUDE.md
