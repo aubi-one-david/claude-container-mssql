@@ -46,6 +46,7 @@ fi
 
 AUTO_PULL="${CLAUDE_AUTO_PULL:-true}"  # Pull by default
 SHARE_AUTH="${CLAUDE_SHARE_AUTH:-true}"  # Share host's ~/.claude by default
+NEW_SESSION="false"  # Resume by default
 
 # Default resource limits
 CPU_LIMIT="${CLAUDE_CPU_LIMIT:-4}"
@@ -100,6 +101,7 @@ OPTIONS:
     --pull            Force pull latest image from registry
     --no-share-auth   Don't mount host's ~/.claude (use isolated auth)
     --shell           Start bash shell instead of Claude
+    --new             Start a new session (don't resume previous)
     --status          Show container and environment status
     --help            Show this help message
 
@@ -224,7 +226,11 @@ run_container() {
 
     # Default command if none provided
     if [ ${#cmd[@]} -eq 0 ]; then
-        cmd=("claude" "--dangerously-skip-permissions" "--resume")
+        if [ "$NEW_SESSION" = "true" ]; then
+            cmd=("claude" "--dangerously-skip-permissions")
+        else
+            cmd=("claude" "--dangerously-skip-permissions" "--resume")
+        fi
     fi
 
     # Determine auth volume mount and user mapping
@@ -319,6 +325,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-share-auth)
             SHARE_AUTH="false"
+            shift
+            ;;
+        --new)
+            NEW_SESSION="true"
             shift
             ;;
         --shell)

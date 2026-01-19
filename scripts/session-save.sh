@@ -24,6 +24,19 @@ if [ -d "$CLAUDE_SESSION_DIR" ]; then
         cp "$LATEST" "$DEST"
         echo "Session saved to: $DEST"
 
+        # Compact session if it's large (>10MB) to prevent heap issues on resume
+        SESSION_SIZE=$(stat -f%z "$LATEST" 2>/dev/null || stat -c%s "$LATEST" 2>/dev/null || echo 0)
+        if [ "$SESSION_SIZE" -gt 10485760 ]; then
+            COMPACT_SCRIPT="$HOME/.local/bin/compact-session.py"
+            if [ -f "$COMPACT_SCRIPT" ]; then
+                echo "Compacting large session ($(numfmt --to=iec $SESSION_SIZE))..."
+                python3 "$COMPACT_SCRIPT" "$LATEST" --max-content-size 500 2>/dev/null || true
+            fi
+        fi
+
+        # Clean up old backup files (>2 days old)
+        find "$CLAUDE_SESSION_DIR" -name "*.jsonl.bak" -mtime +2 -delete 2>/dev/null || true
+
         # Git commit if in a repo
         if git -C "$PROJECT_DIR" rev-parse --git-dir > /dev/null 2>&1; then
             cd "$PROJECT_DIR"

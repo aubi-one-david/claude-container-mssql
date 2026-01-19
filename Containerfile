@@ -87,7 +87,8 @@ COPY --chown=claude:claude config/mcp.json /home/claude/.mcp.json
 ENV PATH="/home/claude/.local/bin:/opt/mssql-tools18/bin:$PATH" \
     HOME="/home/claude" \
     CLAUDE_CONFIG_DIR="/home/claude/.claude" \
-    CLAUDE_WEB_ACCESS="off"
+    CLAUDE_WEB_ACCESS="off" \
+    NODE_OPTIONS="--max-old-space-size=4096"
 
 USER claude
 WORKDIR /workspace
