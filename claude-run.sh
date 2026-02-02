@@ -109,7 +109,7 @@ ENVIRONMENT VARIABLES:
     GITHUB_USERNAME       GitHub username for GHCR image (ghcr.io/$USER/claude-container)
     CLAUDE_CONTAINER_IMAGE  Override image name (default: ghcr.io/$GITHUB_USERNAME/claude-container:latest)
     CLAUDE_AUTO_PULL      Auto-pull on startup: true|false (default: true)
-    CLAUDE_SHARE_AUTH     Mount host ~/.claude for shared auth (default: true)
+    CLAUDE_SHARE_AUTH     Share host credentials and settings from ~/.claude (default: true)
     ANTHROPIC_API_KEY     Claude API key (or use shared OAuth from ~/.claude)
 
     DB_SERVER             Database server hostname
@@ -233,31 +233,39 @@ run_container() {
         fi
     fi
 
-    # Determine auth volume mount and user mapping
-    local auth_mount
+    # Determine auth volume mounts and user mapping
+    # Mount individual files instead of whole ~/.claude to prevent cache pollution
+    # (session data, debug logs, file-history stay inside the container)
+    local auth_mounts=()
     local user_flags=""
     local env_args=(
         -e "CLAUDE_WEB_ACCESS=${CLAUDE_WEB_ACCESS:-off}"
     )
 
     if [ "$SHARE_AUTH" = "true" ] && [ -d "$HOME/.claude" ]; then
-        auth_mount="$HOME/.claude:/home/claude/.claude"
         # Map host user to container user for file permissions
         user_flags="--userns=keep-id --user $(id -u):$(id -g)"
 
         # Check what auth is available
         if [ -f "$HOME/.claude/.credentials.json" ]; then
             log_info "  Auth: OAuth (from ~/.claude)"
+            auth_mounts+=(-v "$HOME/.claude/.credentials.json:/home/claude/.claude/.credentials.json:ro")
         elif [ -n "$ANTHROPIC_API_KEY" ]; then
-            log_info "  Auth: API key (shared ~/.claude for settings)"
+            log_info "  Auth: API key"
             env_args+=(-e "ANTHROPIC_API_KEY")
         else
             log_error "No authentication found"
             log_error "Run 'claude /login' for OAuth or set ANTHROPIC_API_KEY"
             exit 1
         fi
+
+        # Mount user settings read-only if they exist on host
+        [ -f "$HOME/.claude/settings.json" ] && \
+            auth_mounts+=(-v "$HOME/.claude/settings.json:/home/claude/.claude/settings.json:ro")
+        [ -f "$HOME/.claude/settings.local.json" ] && \
+            auth_mounts+=(-v "$HOME/.claude/settings.local.json:/home/claude/.claude/settings.local.json:ro")
     else
-        auth_mount="claude-home:/home/claude/.claude:Z"
+        auth_mounts+=(-v "claude-home:/home/claude/.claude:Z")
         if [ -n "$ANTHROPIC_API_KEY" ]; then
             log_info "  Auth: API key (isolated)"
             env_args+=(-e "ANTHROPIC_API_KEY")
@@ -294,7 +302,7 @@ run_container() {
         --memory="$MEM_LIMIT" \
         --cap-add NET_ADMIN \
         -v "$project_path:/workspace:Z" \
-        -v "$auth_mount" \
+        "${auth_mounts[@]}" \
         "${env_args[@]}" \
         "$IMAGE_NAME" \
         "${cmd[@]}"
