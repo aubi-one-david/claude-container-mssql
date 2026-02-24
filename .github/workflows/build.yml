@@ -57,6 +57,6 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           docker build -t test-container -f Containerfile .
-          docker run --rm test-container claude --version
-          docker run --rm test-container sqlcmd --version
-          docker run --rm test-container python -c "import pyodbc; print('pyodbc:', pyodbc.version)"
+          docker run --rm --entrypoint "" test-container claude --version
+          docker run --rm --entrypoint "" test-container sqlcmd --version
+          docker run --rm --entrypoint "" test-container python -c "import pyodbc; print('pyodbc:', pyodbc.version)"

@@ -30,14 +30,34 @@ else
     log_warn "Firewall initialization failed - running without network restrictions"
 fi
 
+# Ensure session directory exists (Claude Code writes session data here)
+mkdir -p "$HOME/.claude/projects"
+
 # Show environment info
 log_info "Claude Container starting..."
 log_info "  DB_SERVER: ${DB_SERVER:-<not set>}"
 log_info "  Web access: ${CLAUDE_WEB_ACCESS}"
 log_info "  Working directory: $(pwd)"
 
+# Skip auth check for non-interactive commands (version checks, tool tests)
+needs_auth=true
+for arg in "$@"; do
+    case "$arg" in
+        --version|--help|-v|-h)
+            needs_auth=false
+            break
+            ;;
+    esac
+done
+
+# Also skip auth when the command is not claude itself (e.g. sqlcmd, python)
+case "$1" in
+    claude|/usr/local/bin/claude) ;;
+    *) needs_auth=false ;;
+esac
+
 # Check for authentication (API key OR OAuth credentials)
-if [ -z "$ANTHROPIC_API_KEY" ] && [ ! -f "$HOME/.claude/.credentials.json" ]; then
+if [ "$needs_auth" = true ] && [ -z "$ANTHROPIC_API_KEY" ] && [ ! -f "$HOME/.claude/.credentials.json" ]; then
     log_error "No authentication found"
     log_error "Set ANTHROPIC_API_KEY or mount ~/.claude with OAuth credentials"
     exit 1

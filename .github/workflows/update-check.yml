@@ -52,8 +52,8 @@ jobs:
 
       - name: Run tests
         run: |
-          docker run --rm update-test claude --version
-          docker run --rm update-test python -c "import pyodbc; print('pyodbc:', pyodbc.version)"
+          docker run --rm --entrypoint "" update-test claude --version
+          docker run --rm --entrypoint "" update-test python -c "import pyodbc; print('pyodbc:', pyodbc.version)"
 
       - name: Build and push to latest
         uses: docker/build-push-action@v5
